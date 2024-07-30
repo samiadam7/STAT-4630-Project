@@ -1,0 +1,729 @@
+---
+title: "Milestone #4" 
+author: "Team 8"
+fontsize: 12pt
+geometry: margin=1in
+urlcolor: black
+output: pdf_document
+header-includes:
+- \usepackage{setspace}
+- \onehalfspacing
+---
+
+Our team consists of Casey Pridgen (ccp2uz), Colin Dowd (ccd4xc), Xin He (ubn4am), and Sami Adam (zeh4tv)
+
+
+# Section 3 Code
+
+# EDA Code
+
+## Processing
+
+```{r, echo=FALSE, warning=FALSE, results= FALSE, message= FALSE}
+library(dplyr)
+library(readr)
+library(corrplot)
+
+nba_2022_23_all_stats_with_salary <- read_csv("/Users/samiadam/R/STAT 4630 (ML)/Project/nba_2022-23_all_stats_with_salary.csv")
+
+data = nba_2022_23_all_stats_with_salary
+
+data$Position <- factor(data$Position)
+
+# Define a function to group positions
+group_positions <- function(position) {
+  ifelse(grepl("PG|SG|PG-SG|SG-PG", position), "Guard",
+         ifelse(grepl("SF|PF|SF-PF|SF-SG", position), "Forward",
+                "Center"))
+}
+
+# Group the positions
+data$Position_Group <- factor(sapply(data$Position, group_positions))
+
+# Creation of Starter
+data$Starter = ifelse(data$GS >= 0.5 * data$GP, 1, 0)
+data$Starter = factor(data$Starter)
+
+data[is.na(data)] = 0
+
+```
+
+### Obtaining sample data
+
+```{r}
+set.seed(4630)
+
+perc = 0.5
+
+sample_data = sample.int(nrow(data), floor(perc * nrow(data)), replace = F)
+
+```
+
+### Categorical Variable Frequency Tables
+
+```{r}
+
+library(pander)
+
+# Create a formatted table for Starter
+pander(table(data[sample_data, ]$Starter), caption = "Frequency Table for Starter")
+
+# Create a formatted table for Position_Group
+pander(table(data[sample_data, ]$Position_Group), caption = "Frequency Table for Position_Group")
+
+# Create a formatted table for Position
+pander(table(data[sample_data, ]$Position), caption = "Frequency Table for Position_Group")
+
+```
+
+### Train Test Data
+
+```{r}
+
+keep_quant_q = c('Salary','Age','FG','TRB','AST','STL','BLK','TOV','PF','MP','PER','TS%','3PAr','WS/48','BPM','VORP', 'Position_Group', 'Starter')
+
+# data for the quantitative questions
+data_quant_q = data[,keep_quant_q]
+
+```
+
+## Plots
+
+### Correlation Matrix
+
+```{r}
+
+# Obtain quantitative variables
+quant = data_quant_q[,sapply(data_quant_q, is.numeric)]
+
+corrplot(cor(quant[,-1]))
+
+corrplot(cor(quant[,1], quant[,-1]))
+```
+
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+
+# Density plot for Salary
+ggplot(data_quant_q[sample_data, ], aes(x = Salary)) +
+  geom_density(fill = "steelblue", color = "black", alpha = 0.5) +
+  labs(x = "Salary", y = "Density") +
+  theme_minimal()
+
+# Density plot for log(Salary)
+ggplot(data_quant_q[sample_data, ], aes(x = log(Salary))) +
+  geom_density(fill = "steelblue", color = "black", alpha = 0.5) +
+  labs(x = "Log(Salary)", y = "Density") +
+  theme_minimal()
+
+# Position Group Boxplot
+ggplot(data_quant_q[sample_data, ], aes(x = Position_Group, y = Salary, fill = Position_Group)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_manual(values = c("#D0D0FF", "#6666FF", "#0000FF")) +
+  labs(x = "Position Group",
+       y = "Salary",
+       fill = "Position Group") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(face = "bold"))
+
+# Starter Boxplot
+ggplot(data_quant_q[sample_data, ], aes(x = Starter, y = Salary, fill = Starter)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_manual(values = c("#D0D0FF", "#0000FF")) +
+  labs(x = "Starter",
+       y = "Salary",
+       fill = "Starter") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(face = "bold"))
+
+
+
+```
+# Shrinkage Methods
+
+## Preprocessing
+
+```{r}
+
+# Splits for shrinkage
+x_shrink = model.matrix(Salary~., data = data_quant_q)[,-1]
+y_shrink = (log(data$Salary))
+
+x_train_shrink = x_shrink[sample_data,]
+x_test_shrink = x_shrink[-sample_data,]
+
+y_train_shrink = y_shrink[sample_data]
+y_test_shrink = y_shrink[-sample_data]
+
+```
+
+## Choosing Threshold
+
+```{r}
+
+library(glmnet)
+
+# Ridge Model w/ No penalty
+ridge_reg = glmnet(x_train_shrink, y_train_shrink, alpha = 0, lambda = 0, thresh = 1e-13)
+
+# OLS Model
+lin_reg = lm(y_train_shrink~x_train_shrink)
+
+# Table comparing the coefficients
+
+cbind(coefficients(ridge_reg), coefficients(lin_reg))
+
+# Error term to determine error
+mean((coefficients(ridge_reg) - coefficients(lin_reg))^2)
+
+```
+
+## Ridge
+
+### Choosing lambda
+
+```{r}
+
+set.seed(4630)
+
+cv_out = cv.glmnet(x_train_shrink, y_train_shrink, alpha = 0, thresh = 1e-13)
+plot(cv_out)
+best_lambda_r = cv_out$lambda.min
+best_lambda_r
+
+```
+
+### Ridge Results
+
+```{r}
+
+# Model
+ridge = glmnet(x_train_shrink,y_train_shrink,alpha = 0, lambda = best_lambda_r, thresh = 1e-13)
+
+# Coefficients
+coefficients(ridge)
+
+# TMSE
+ridge_preds = predict(ridge, x_test_shrink)
+ridge_tmse = mean((ridge_preds - y_test_shrink)^2)
+ridge_tmse
+
+```
+
+```{r}
+
+##Create plot of Ridge coeff against lambda
+grid = 10^seq(10,-10,length=100)
+out_all = glmnet::glmnet(x_train_shrink,y_train_shrink,alpha= 0,lambda=grid)
+plot(out_all, xvar = "lambda", col = 1:dim(x_train_shrink)[2])
+abline(v=log(best_lambda_r), lty=2)
+legend("bottomright", lwd = 1, col = 1:dim(x_shrink)[2], legend = colnames(x_shrink), cex = .7)
+
+```
+
+## Lasso
+
+### Choosing lambda
+
+```{r}
+
+set.seed(4630)
+
+cv_out = cv.glmnet(x_train_shrink, y_train_shrink, alpha = 1, thresh = 1e-13)
+plot(cv_out)
+best_lambda_l = cv_out$lambda.min
+best_lambda_l
+
+```
+
+### Lasso Results
+
+```{r}
+
+# Model
+lasso = glmnet(x_train_shrink,y_train_shrink,alpha = 1, lambda = best_lambda_l, thresh = 1e-13)
+
+# Coefficients
+coefficients(lasso)
+
+# TMSE
+lasso_preds = predict(lasso, x_test_shrink)
+lasso_tmse = mean((lasso_preds - y_test_shrink)^2)
+lasso_tmse
+
+```
+
+```{r}
+
+##Create plot of Lasso coeff against lambda
+grid = 10^seq(5,-5,length=100)
+out_all = glmnet::glmnet(x_train_shrink,y_train_shrink,alpha= 1,lambda=grid)
+plot(out_all, xvar = "lambda", col = 1:dim(x_train_shrink)[2])
+abline(v=log(best_lambda_l), lty=2)
+legend("bottomright", lwd = 1, col = 1:dim(x_shrink)[2], legend = colnames(x_shrink), cex = .7)
+
+```
+
+# Regression Tree
+
+## Train and Test Data
+
+```{r}
+
+library(dplyr)
+
+data_quant_q$Salary = log(data_quant_q$Salary)
+data_quant_q$Position_Group = factor(data_quant_q$Position_Group)
+data_quant_q$Starter = factor(data_quant_q$Starter)
+
+data_quant_q_renamed <- data_quant_q %>% rename(TS = `TS%`, WS48 = `WS/48`)
+data_quant_q_renamed <- data_quant_q_renamed %>% rename(ThreePAr = `3PAr`)
+
+train_rtree = data_quant_q_renamed[sample_data,]
+test_rtree = data_quant_q_renamed[-sample_data,]
+
+y_train_rtree = train_rtree$Salary
+y_test_rtree = test_rtree$Salary
+
+```
+
+##RBS
+
+```{r}
+
+library(tree)
+library(randomForest)
+
+# Model
+#tree.data = tree(Salary~ Age + FG + TRB + AST + STL + BLK + TOV + PF + MP + PER + TS + ThreePAr + WS48 + BPM + VORP + Position_Group + Starter, data = train_rtree)
+#summary(tree.data) 
+
+tree.data = tree(Salary~., data = train_rtree)
+summary(tree.data) 
+```
+
+```{r}
+
+# Plotting tree
+plot(tree.data)
+text(tree.data, cex=0.75)
+
+```
+
+```{r}
+
+# Test Error
+test_tree<-predict(tree.data, newdata = test_rtree)
+mse_tree<-mean((y_test_rtree - test_tree)^2)
+mse_tree
+
+```
+
+## Prune Tree
+
+```{r}
+
+# Obtaining tree value
+set.seed(4630)
+cv.data<-cv.tree(tree.data, K = 10)
+
+# Plotting size vs deviance
+plot(cv.data$size, cv.data$dev, type='b', ylab="Deviance", xlab="Size")
+
+trees.num<-cv.data$size[which.min(cv.data$dev)]
+trees.num
+prune.data<-prune.tree(tree.data, best=trees.num)
+
+```
+
+```{r}
+
+# Prune Tree Summary
+summary(prune.data)
+
+# Plotting Prune Tree
+plot(prune.data)
+text(prune.data, cex=0.75)
+
+# Test MSE
+test_tree1<-predict(prune.data, newdata = test_rtree)
+mse_prune<-mean((y_test_rtree - test_tree1)^2)
+mse_prune
+
+```
+
+## Random Forests
+
+```{r}
+set.seed(4630)
+
+# Model
+rf.data<-randomForest(Salary~., data = train_rtree, mtry = 5, importance = TRUE)
+rf.data
+
+# Important Variables
+round(importance(rf.data),2)
+varImpPlot(rf.data)
+
+# Error Terms
+test.rf<-predict(rf.data, newdata=test_rtree)
+mse_rf<-mean((y_test_rtree-test.rf)^2)
+mse_rf
+
+```
+
+## Comparison
+
+```{r}
+comparison_table <- data.frame(
+  Model = c("Lasso", "Recursive Binary Splitting", "Random Forest"),
+  Test_MSE = c(round(lasso_tmse, 2), round(mse_prune, 2), round(mse_rf, 2)))
+comparison_table
+```
+
+# Classification
+
+```{r, echo=FALSE, warning=FALSE, results= FALSE, message= FALSE}
+library(dplyr)
+library(readr)
+library(corrplot)
+
+nba_2022_23_all_stats_with_salary <- read_csv("/Users/samiadam/R/STAT 4630 (ML)/Project/nba_2022-23_all_stats_with_salary.csv")
+
+data = nba_2022_23_all_stats_with_salary
+
+data$Position <- factor(data$Position)
+
+# Define a function to group positions
+group_positions <- function(position) {
+  ifelse(grepl("PG|SG|PG-SG|SG-PG", position), "Guard",
+         ifelse(grepl("SF|PF|SF-PF|SF-SG", position), "Forward",
+                "Center"))
+}
+
+# Group the positions
+data$Position_Group <- factor(sapply(data$Position, group_positions))
+
+# Creation of Starter
+data$Starter = ifelse(data$GS >= 0.5 * data$GP, 1, 0)
+data$Starter = factor(data$Starter)
+
+data[is.na(data)] = 0
+
+```
+
+## Train and Test
+```{r, include=FALSE}
+library(tree) 
+library(dplyr)
+library(readr)
+library(corrplot)
+
+set.seed(4630)
+
+perc = 0.5
+
+sample_data = sample.int(nrow(data), floor(perc * nrow(data)), replace = F)
+
+cat_vars = c("Starter", "VORP", "OBPM", "DBPM", "TOV", "FT%", "FG", "TRB", "AST", "STL", "BLK", "WS/48")
+cat_data = data[,cat_vars]
+
+train<-cat_data[sample_data, ]
+test<-cat_data[-sample_data, ]
+y.test<-test[,"Starter"]
+
+y.test.vector <- as.vector(as.matrix(y.test))
+y.test.vector.factor <- as.factor(y.test.vector)
+
+
+train <- train %>% rename("WS_48" = "WS/48")
+train <- train %>% rename("FTP" = "FT%")
+
+test <- test %>% rename("WS_48" = "WS/48")
+test <- test %>% rename("FTP" = "FT%")
+```
+
+## Exploratory Data Analysis
+
+```{r}
+
+for (col in names(train)) {
+  # Skip plotting if col is "Position"
+  if (col == "Position") {
+    next
+  }
+  
+  # Set the plot title
+  plot_title <- paste("Boxplot of", col, "vs. Starter")
+  
+  # Create the boxplot
+  boxplot(train[[col]] ~ Starter, data = train,
+          xlab = "Starter", ylab = col, main = plot_title)
+}
+
+```
+
+
+```{r}
+
+corr_train = cor(train[,-1])
+corrplot(corr_train)
+corr_train
+
+```
+
+```{r}
+colors = ifelse(train$Starter == 1, "green", "black")
+pairs(train[-1], upper.panel = NULL, col= colors, main= "Variable Scatterplot Matrix based on Starter")
+```
+
+
+```{r}
+
+colors <- ifelse(data$Position_Group == "Center", "red",
+                 ifelse(data$Position_Group == "Forward", "blue", "green"))
+
+pairs_data = train[,c("OBPM", "DBPM", "TOV", "FG", "TRB", "AST", "STL", "BLK")]
+pairs(pairs_data, upper.panel = NULL, col = colors)
+
+
+
+```
+
+## Models
+
+## LDA 
+
+```{r}
+library(MASS)
+library(readr)
+library(corrplot)
+library(klaR)
+
+# Kurtosis and skew test
+## The x variables fail the normality assumption. It is not a multivariate normal distribution
+
+ICS::mvnorm.kur.test(train[,-1])
+ICS::mvnorm.skew.test(test[,-1])
+
+# LDA results
+
+#lda_nba <- lda(Starter ~ ., data = train)
+
+#plot(lda_nba, dimen = 1, type = "b")
+
+#lda_train_res = predict(lda_nba)
+#1 - mean(train$Starter == lda_train_res$class)
+
+#lda_nba
+```
+
+## Logistic Regression
+
+```{r}
+
+# Choosing the variables for the first logistic regression
+
+log1_train = train
+log1_test = test
+
+# training the model
+
+log1_nba <- glm(Starter~., family=binomial, data=log1_train)
+
+summary(log1_nba)
+```
+
+```{r}
+library(ROCR)
+
+# ROC Curve
+
+preds <- predict(log1_nba, newdata=log1_test, type="response")
+
+rates <- ROCR::prediction(preds, log1_test$Starter)
+
+roc_result <- ROCR::performance(rates, measure="tpr", x.measure="fpr")
+
+plot(roc_result)
+lines(x = c(0,1), y = c(0,1), col="red")
+```
+
+```{r}
+
+# AUC Values
+
+auc1 <- ROCR::performance(rates, measure = "auc")
+auc1@y.values
+```
+
+
+```{r}
+
+# K Fold CV 5
+
+set.seed(4630)
+five.fold_1_5 <- boot::cv.glm(log1_train, log1_nba, K=5)
+five.fold_1_5$delta
+```
+
+```{r}
+
+# K Fold CV 10
+
+set.seed(4630)
+five.fold_1_10 <- boot::cv.glm(log1_train, log1_nba, K=10)
+five.fold_1_10$delta
+```
+
+```{r}
+
+THRESH = 0.5
+
+log.pred.prob <- predict(log1_nba, newdata=log1_test, type = "response")
+log.pred.class <- ifelse(log.pred.prob > THRESH, 1, 0)
+
+log_table = table(log1_test$Starter, log.pred.prob > THRESH)
+pander(log_table)
+
+log_er = 1 - mean(log.pred.class == log1_test$Starter)
+log_er
+
+# FPR and FNR
+log_fpr = log_table[1,2] / (log_table[1,2] + log_table[1,1])
+log_fpr
+
+log_fnr = log_table[2,1] / (log_table[2,1] + log_table[2,2])
+log_fnr
+```
+
+## Trees
+```{r}
+
+# Model
+
+tree.class.train<-tree::tree(Starter~ VORP + OBPM + DBPM + TOV + FTP + TRB + AST + STL + BLK + WS_48, data = train)
+summary(tree.class.train)
+
+```
+
+```{r}
+##plot tree
+plot(tree.class.train)
+text(tree.class.train, cex=0.6)
+```
+
+```{r}
+
+##find predicted classes for test data
+tree.pred.test<-predict(tree.class.train, newdata=test, type="class")
+
+##find predicted probabilities for test data
+pred.probs<-predict(tree.class.train, newdata=test)
+
+# Table
+rbs_table = table(y.test.vector.factor, tree.pred.test)
+rbs_table
+
+```
+
+```{r}
+##overall test error rate
+rbs_er = 1-mean(tree.pred.test==y.test.vector.factor)
+rbs_er
+
+# FPR and FNR
+rbs_fpr = rbs_table[1,2] / (rbs_table[1,2] + rbs_table[1,1])
+rbs_fpr
+
+rbs_fnr = rbs_table[2,1] / (rbs_table[2,1] + rbs_table[2,2])
+rbs_fnr
+```
+
+# Pruning
+
+```{r}
+
+set.seed(4630)
+cv.class<-tree::cv.tree(tree.class.train, K=10, FUN=prune.misclass)
+
+##plot of dev against size
+plot(cv.class$size, cv.class$dev,type='b')
+
+##size of tree chosen by pruning
+trees.num.class<-cv.class$size[which.min(cv.class$dev)]
+trees.num.class ##9 terminal nodes. A lot smaller than recursive binary splitting
+
+##fit tree with size chosen by pruning
+prune.class<-tree::prune.misclass(tree.class.train, best=trees.num.class)
+summary(prune.class)
+```
+
+```{r}
+##plot pruned tree
+plot(prune.class)
+text(prune.class, cex=0.6, pretty=0)
+```
+
+```{r}
+##prediction based on pruned tree for test data
+tree.pred.prune<-predict(prune.class, newdata=test, type="class")
+##confusion matrix for test data
+prune_table = table(y.test.vector.factor, tree.pred.prune)
+pander(prune_table)
+```
+
+```{r}
+##overall test error rate
+prune_er = 1-mean(tree.pred.prune==y.test.vector.factor)
+prune_er
+
+# FPR and FNR
+prune_fpr = prune_table[1,2] / (prune_table[1,2] + prune_table[1,1])
+prune_fpr
+
+prune_fnr = prune_table[2,1] / (prune_table[2,1] + prune_table[2,2])
+prune_fnr
+```
+
+## Random Forests
+
+```{r}
+set.seed(4630)
+# Model
+rf.data<-randomForest::randomForest(Starter~ VORP + OBPM + DBPM + TOV + FTP + TRB + AST + STL + BLK + WS_48, data = train, mtry = 3, importance = TRUE)
+rf.data
+
+# Importance plot
+randomForest::varImpPlot(rf.data)
+
+```
+
+```{r}
+#overall test error rate
+pred.rf<-predict(rf.data, newdata=test)
+
+rf_er = 1-mean(y.test.vector.factor==pred.rf)
+rf_er
+```
+
+## Comparison
+
+```{r}
+
+comparison_table <- data.frame(
+  Model = c("Logistic Regression", "Pruned Tree", "Random Forest"),
+  test_errors = c(round(log_er, 2), round(prune_er, 2), round(rf_er, 2)),
+  FPRs = c(round(log_fpr, 2), round(prune_fpr, 2), round((12 / (150 + 12)), 2)),
+  FNRs = c(round(log_fnr, 2), round(prune_fnr, 2), round(18 / (18 + 53), 2))
+)
+comparison_table
+
+```
+
